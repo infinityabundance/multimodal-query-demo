@@ -1,5 +1,7 @@
 # mqd-engine
 
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/infinityabundance/multimodal-query-demo/blob/main/notebooks/reproduce.ipynb)
+
 Async ingest pipeline, snapshot-isolated store, point-in-time and range queries with query-plan telemetry, and two domain operators for the [multimodal-query-demo](https://github.com/infinityabundance/multimodal-query-demo) workspace.
 
 One crate for everything that touches Arrow `RecordBatch` data in motion. Depends only on [`mqd-core`](https://crates.io/crates/mqd-core) for types and schemas.

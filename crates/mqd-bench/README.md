@@ -1,5 +1,7 @@
 # mqd-bench
 
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/infinityabundance/multimodal-query-demo/blob/main/notebooks/reproduce.ipynb)
+
 Criterion benches and the shared `Fixture` helper for the [multimodal-query-demo](https://github.com/infinityabundance/multimodal-query-demo) workspace.
 
 Keeps the seeded-workload construction in one place so the three criterion harnesses and the `mqd bench` single-file JSON report measure the same thing. Depends on [`mqd-core`](https://crates.io/crates/mqd-core) and [`mqd-engine`](https://crates.io/crates/mqd-engine).

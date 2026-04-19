@@ -1,5 +1,7 @@
 # mqd-core
 
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/infinityabundance/multimodal-query-demo/blob/main/notebooks/reproduce.ipynb)
+
 Shared types, Arrow schemas, `StatusReporter` trait, and the numbered non-claims constant for the [multimodal-query-demo](https://github.com/infinityabundance/multimodal-query-demo) workspace.
 
 Pure types and traits. No tokio, no I/O, no dependency on the engine. This keeps the engine crate fully async without contaminating the testability of the type layer, and lets downstream consumers depend on the vocabulary without pulling in the runtime.

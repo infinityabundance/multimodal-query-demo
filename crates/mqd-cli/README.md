@@ -1,5 +1,7 @@
 # mqd-cli
 
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/infinityabundance/multimodal-query-demo/blob/main/notebooks/reproduce.ipynb)
+
 The `mqd` binary — a clap-based command-line surface for every engine path in the [multimodal-query-demo](https://github.com/infinityabundance/multimodal-query-demo) workspace.
 
 One binary, every engine path. A reviewer can exercise ingest, queries, operators, benches, and figure generation without writing Rust. Depends on [`mqd-core`](https://crates.io/crates/mqd-core), [`mqd-engine`](https://crates.io/crates/mqd-engine), and [`mqd-bench`](https://crates.io/crates/mqd-bench).
