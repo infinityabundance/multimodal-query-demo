@@ -32,3 +32,6 @@ rand_pcg     = { workspace = true }
 
 [dev-dependencies]
 tokio        = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "test-util"] }
+
+[lints]
+workspace = true

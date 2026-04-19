@@ -30,3 +30,6 @@ harness = false
 [[bench]]
 name    = "ops_scale"
 harness = false
+
+[lints]
+workspace = true

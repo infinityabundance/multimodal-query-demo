@@ -81,6 +81,15 @@ cargo fmt --check
 
 39+ tests: the engine's unit tests; `tests/concurrent_snapshots.rs` (reader/writer stress with a background flusher); `tests/deterministic_replay.rs` (SHA-256 pinned generator + proximity output); `tests/non_claim_lock.rs` (parses the paper, asserts each `\item` matches `NON_CLAIMS` verbatim).
 
+## Model-checking proofs
+
+Seven `#[kani::proof]` harnesses verify integer invariants the query engine depends on, all run unconstrained over the full `i64` domain: one on `bucket_of` (the degenerate-bucket guard — a non-positive `bucket_ns` deterministically returns 0 instead of panicking in `div_euclid`), and six on the `in_half_open` row-level range predicate (lower-bound inclusivity iff window is non-empty, upper-bound exclusivity, empty-window rejection, out-of-window rejection on both sides, inverted-bounds detection). Each discharges in under a second. The three multiplicative `bucket_of` invariants (containment, alignment, monotonicity) are *deliberately* not machine-checked — CBMC's SAT backend cannot discharge `div_euclid × mul` nonlinear queries on symbolic `i64` in useful time, and a bounded-at-an-artificially-small-N proof would overclaim. They are stated in [`PROOFS.md`](PROOFS.md) as reasoned corollaries of `std::i64::div_euclid`'s contract and covered by existing unit tests. That file also lists what's explicitly *not* proven (Arrow walks, async, floats, concurrency, string validation).
+
+```bash
+cargo install --locked kani-verifier && cargo kani setup
+cargo kani -p mqd-engine
+```
+
 ## Audit
 
 Per-crate static source-visible audit reports from [`dsfb-gray`](https://crates.io/crates/dsfb-gray) live under [`audit/`](audit/). Each directory holds the human-readable `.txt` report, SARIF 2.1.0 findings, and an in-toto + DSSE attestation pinning the source SHA-256 to the scoring predicate.

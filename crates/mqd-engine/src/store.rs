@@ -205,6 +205,32 @@ fn debug_assert_monotonic(t_col: &Int64Array) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Kani proof harnesses for `bucket_of`.
+//
+// Scope: this file machine-checks one linear property of `bucket_of` — the degenerate-input
+// guard. The three multiplicative invariants (containment, alignment, monotonicity) are
+// corollaries of Rust's `i64::div_euclid` contract and are covered by conventional unit tests
+// (`batch_spanning_two_buckets_is_split`, `batch_spanning_three_buckets_is_split`, and
+// `append_creates_partitions_by_bucket`). They are NOT machine-checked here because CBMC's
+// CaDiCaL SAT backend does not discharge the nonlinear `div_euclid + multiply` query at any
+// `i64` bound large enough to be worth claiming. See `PROOFS.md` §"What is NOT verified" for
+// the honest statement and references to the standard library's own `div_euclid` documentation
+// for the contract we rely on.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+#[cfg(kani)]
+mod kani_proofs {
+    use super::bucket_of;
+
+    #[kani::proof]
+    fn bucket_of_degenerate_bucket_ns_returns_zero() {
+        let t: i64 = kani::any();
+        let b: i64 = kani::any();
+        kani::assume(b <= 0);
+        assert!(bucket_of(t, b) == 0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

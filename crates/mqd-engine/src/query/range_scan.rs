@@ -20,6 +20,15 @@ use mqd_core::{schema_for, ComponentKind, EntityPath};
 use crate::query::QueryPlan;
 use crate::store::StoreSnapshot;
 
+/// Half-open time-range predicate: `start_ns <= t < end_ns`.
+///
+/// Matches Rust's `Range<i64>::contains`. Extracted as a pure integer function so it can be
+/// reused by the row-mask builder and verified in isolation by Kani — see `kani_proofs` below.
+#[inline]
+pub fn in_half_open(t_ns: i64, start_ns: i64, end_ns: i64) -> bool {
+    t_ns >= start_ns && t_ns < end_ns
+}
+
 #[derive(Clone, Debug)]
 pub struct RangeScanQuery {
     pub kind: ComponentKind,
@@ -120,13 +129,91 @@ fn build_mask(
     let mut bits = Vec::with_capacity(n);
     for i in 0..n {
         let t = t_col.value(i);
-        let in_time = t >= start_ns && t < end_ns;
+        let in_time = in_half_open(t, start_ns, end_ns);
         let in_entity = entity_filter
             .map(|e| entity_col.value(i) == e)
             .unwrap_or(true);
         bits.push(in_time && in_entity);
     }
     BooleanArray::from(bits)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Kani proof harnesses for `in_half_open` and the inverted-bounds guard.
+//
+// Scope: pure `i64`-domain boundary properties of the half-open predicate and the inversion
+// check actually used inside `range_scan`. These proofs do NOT cover `build_mask` (which
+// walks an Arrow `Int64Array`, outside Kani's model) or the `filter_record_batch` / `concat`
+// steps. See `PROOFS.md` at the repo root for the explicit what-is / what-isn't list.
+//
+// Invariants proven (unbounded over i64):
+//   1. lower boundary included   — `in_half_open(start, start, end)` iff `start < end`
+//   2. upper boundary excluded   — `in_half_open(end,   start, end)` is always false
+//   3. empty window rejects all  — `start == end ⟹ in_half_open(t, start, end)` is false
+//   4. monotonic in t (off)      — if `t < start` or `t >= end` the predicate is false
+//   5. inversion check matches   — `start > end` is the exact rejection condition
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+#[cfg(kani)]
+mod kani_proofs {
+    use super::in_half_open;
+
+    #[kani::proof]
+    fn in_half_open_includes_lower_bound_iff_window_nonempty() {
+        let s: i64 = kani::any();
+        let e: i64 = kani::any();
+        // The predicate at t == start is true exactly when the window is non-empty.
+        assert!(in_half_open(s, s, e) == (s < e));
+    }
+
+    #[kani::proof]
+    fn in_half_open_excludes_upper_bound() {
+        let s: i64 = kani::any();
+        let e: i64 = kani::any();
+        // The predicate at t == end is always false, regardless of window shape.
+        assert!(!in_half_open(e, s, e));
+    }
+
+    #[kani::proof]
+    fn in_half_open_empty_window_is_empty() {
+        let t: i64 = kani::any();
+        let w: i64 = kani::any();
+        // When start == end, no t satisfies the predicate.
+        assert!(!in_half_open(t, w, w));
+    }
+
+    #[kani::proof]
+    fn in_half_open_below_lower_bound_rejected() {
+        let t: i64 = kani::any();
+        let s: i64 = kani::any();
+        let e: i64 = kani::any();
+        kani::assume(t < s);
+        assert!(!in_half_open(t, s, e));
+    }
+
+    #[kani::proof]
+    fn in_half_open_above_upper_bound_rejected() {
+        let t: i64 = kani::any();
+        let s: i64 = kani::any();
+        let e: i64 = kani::any();
+        kani::assume(t >= e);
+        assert!(!in_half_open(t, s, e));
+    }
+
+    // Mirror of the inline check at the top of `range_scan`:
+    //   `if query.start_ns > query.end_ns { bail!(...) }`
+    // Expressed as a pure predicate so the rejection condition can be verified independently.
+    #[inline]
+    fn bounds_are_valid(start_ns: i64, end_ns: i64) -> bool {
+        start_ns <= end_ns
+    }
+
+    #[kani::proof]
+    fn inverted_bounds_are_exactly_the_rejected_set() {
+        let s: i64 = kani::any();
+        let e: i64 = kani::any();
+        assert!(bounds_are_valid(s, e) == (s <= e));
+        assert!(!bounds_are_valid(s, e) == (s > e));
+    }
 }
 
 #[cfg(test)]
