@@ -1273,7 +1273,7 @@ dependencies = [
 
 [[package]]
 name = "mqd-bench"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arrow",
@@ -1285,7 +1285,7 @@ dependencies = [
 
 [[package]]
 name = "mqd-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arrow",
@@ -1306,7 +1306,7 @@ dependencies = [
 
 [[package]]
 name = "mqd-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -1322,7 +1322,7 @@ dependencies = [
 
 [[package]]
 name = "mqd-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arc-swap",
