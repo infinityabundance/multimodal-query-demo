@@ -1,6 +1,7 @@
 # mqd-cli
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/infinityabundance/multimodal-query-demo/blob/main/notebooks/reproduce.ipynb)
+[![DSFB Gray Audit: 51.7% limited assurance evidence](https://img.shields.io/badge/DSFB%20Gray%20Audit-51.7%25-orange)](https://github.com/infinityabundance/multimodal-query-demo/blob/main/audit/mqd-cli/mqd_cli_scan.txt)
 
 The `mqd` binary — a clap-based command-line surface for every engine path in the [multimodal-query-demo](https://github.com/infinityabundance/multimodal-query-demo) workspace.
 

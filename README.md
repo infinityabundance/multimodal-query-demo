@@ -81,6 +81,19 @@ cargo fmt --check
 
 39+ tests: the engine's unit tests; `tests/concurrent_snapshots.rs` (reader/writer stress with a background flusher); `tests/deterministic_replay.rs` (SHA-256 pinned generator + proximity output); `tests/non_claim_lock.rs` (parses the paper, asserts each `\item` matches `NON_CLAIMS` verbatim).
 
+## Audit
+
+Per-crate static source-visible audit reports from [`dsfb-gray`](https://crates.io/crates/dsfb-gray) live under [`audit/`](audit/). Each directory holds the human-readable `.txt` report, SARIF 2.1.0 findings, and an in-toto + DSSE attestation pinning the source SHA-256 to the scoring predicate.
+
+| Crate | Score | Posture |
+|---|---|---|
+| [`mqd-core`](audit/mqd-core/mqd_core_scan.txt) | 68.0% | mixed assurance |
+| [`mqd-engine`](audit/mqd-engine/mqd_engine_scan.txt) | 58.8% | mixed assurance |
+| [`mqd-bench`](audit/mqd-bench/mqd_bench_scan.txt) | 61.3% | mixed assurance |
+| [`mqd-cli`](audit/mqd-cli/mqd_cli_scan.txt) | 51.7% | limited evidence |
+
+These are **review-readiness scores, not compliance certifications** — DSFB Gray surfaces reviewable structural patterns (bounded loops, assertion density, lifecycle artefacts, dependency pinning) against a locked rubric and does not run the code. See [`audit/README.md`](audit/README.md) for the methodology, per-crate source hashes, and how to reproduce the scans.
+
 ## Paper
 
 ```bash
@@ -91,7 +104,7 @@ Figures regenerate from a single `out/bench.json` produced by `mqd bench`, then 
 
 ## The four crates
 
-### [`mqd-core`](crates/mqd-core/) — types, schemas, traits · [![crates.io](https://img.shields.io/crates/v/mqd-core.svg)](https://crates.io/crates/mqd-core)
+### [`mqd-core`](crates/mqd-core/) — types, schemas, traits · [![crates.io](https://img.shields.io/crates/v/mqd-core.svg)](https://crates.io/crates/mqd-core) · [![DSFB Gray Audit: 68.0%](https://img.shields.io/badge/DSFB%20Gray%20Audit-68.0%25-yellowgreen)](audit/mqd-core/mqd_core_scan.txt)
 
 **What.** `EntityPath` (validated slash-delimited hierarchical path), `ComponentKind` enum, Arrow `Schema` factory per kind, `Event` (the ingest unit), `StatusReporter` trait with `TerminalReporter` / `JsonReporter` / `NullReporter`, and the numbered `NON_CLAIMS` constant.
 
@@ -107,7 +120,7 @@ let schema = schema_for(ComponentKind::Transform3D);
 assert_eq!(schema.field(0).name(), "t_ns");
 ```
 
-### [`mqd-engine`](crates/mqd-engine/) — ingest, store, query, ops · [![crates.io](https://img.shields.io/crates/v/mqd-engine.svg)](https://crates.io/crates/mqd-engine)
+### [`mqd-engine`](crates/mqd-engine/) — ingest, store, query, ops · [![crates.io](https://img.shields.io/crates/v/mqd-engine.svg)](https://crates.io/crates/mqd-engine) · [![DSFB Gray Audit: 58.8%](https://img.shields.io/badge/DSFB%20Gray%20Audit-58.8%25-yellowgreen)](audit/mqd-engine/mqd_engine_scan.txt)
 
 **What.** The async ingest pipeline (`ingest::run` with producer/flusher topology and `CancellationToken`-driven shutdown), the snapshot-isolated `Store`, the `latest_at` / `range_scan` query implementations with `QueryPlan` telemetry, and the two domain operators (`proximity_pairs`, `speed_over_ground`).
 
@@ -134,7 +147,7 @@ let result = latest_at(&snap, LatestAtQuery {
 println!("rows={} scanned_partitions={}", result.batch.num_rows(), result.plan.scanned_partitions);
 ```
 
-### [`mqd-cli`](crates/mqd-cli/) — the `mqd` binary · [![crates.io](https://img.shields.io/crates/v/mqd-cli.svg)](https://crates.io/crates/mqd-cli)
+### [`mqd-cli`](crates/mqd-cli/) — the `mqd` binary · [![crates.io](https://img.shields.io/crates/v/mqd-cli.svg)](https://crates.io/crates/mqd-cli) · [![DSFB Gray Audit: 51.7%](https://img.shields.io/badge/DSFB%20Gray%20Audit-51.7%25-orange)](audit/mqd-cli/mqd_cli_scan.txt)
 
 **What.** clap-based subcommands: `generate` (seeded synthetic event stream), `ingest` (JSONL → store, with `--batch-rows`), `query latest-at` / `query range` (with `--explain`), `op proximity` / `op speed`, `bench` (single-file JSON benchmark report), `figs` (PNGs from that report), and `non-claims` (prints the numbered charter). Reporter switch: `--json` before any subcommand emits NDJSON.
 
@@ -148,7 +161,7 @@ cargo run -p mqd-cli --release -- query range \
   --entity /agent/0 --kind transform3d --explain
 ```
 
-### [`mqd-bench`](crates/mqd-bench/) — criterion benches + shared fixtures · [![crates.io](https://img.shields.io/crates/v/mqd-bench.svg)](https://crates.io/crates/mqd-bench)
+### [`mqd-bench`](crates/mqd-bench/) — criterion benches + shared fixtures · [![crates.io](https://img.shields.io/crates/v/mqd-bench.svg)](https://crates.io/crates/mqd-bench) · [![DSFB Gray Audit: 61.3%](https://img.shields.io/badge/DSFB%20Gray%20Audit-61.3%25-yellowgreen)](audit/mqd-bench/mqd_bench_scan.txt)
 
 **What.** Three criterion benches (`ingest_throughput`, `query_latency`, `ops_scale`) plus a shared `Fixture { seed, agents, ticks }` helper consumed by both the criterion harnesses and the `mqd bench` CLI subcommand.
 

@@ -1,6 +1,7 @@
 # mqd-core
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/infinityabundance/multimodal-query-demo/blob/main/notebooks/reproduce.ipynb)
+[![DSFB Gray Audit: 68.0% mixed assurance posture](https://img.shields.io/badge/DSFB%20Gray%20Audit-68.0%25-yellowgreen)](https://github.com/infinityabundance/multimodal-query-demo/blob/main/audit/mqd-core/mqd_core_scan.txt)
 
 Shared types, Arrow schemas, `StatusReporter` trait, and the numbered non-claims constant for the [multimodal-query-demo](https://github.com/infinityabundance/multimodal-query-demo) workspace.
 

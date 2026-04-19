@@ -1,6 +1,7 @@
 # mqd-bench
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/infinityabundance/multimodal-query-demo/blob/main/notebooks/reproduce.ipynb)
+[![DSFB Gray Audit: 61.3% mixed assurance posture](https://img.shields.io/badge/DSFB%20Gray%20Audit-61.3%25-yellowgreen)](https://github.com/infinityabundance/multimodal-query-demo/blob/main/audit/mqd-bench/mqd_bench_scan.txt)
 
 Criterion benches and the shared `Fixture` helper for the [multimodal-query-demo](https://github.com/infinityabundance/multimodal-query-demo) workspace.
 
