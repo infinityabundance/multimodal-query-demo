@@ -91,7 +91,7 @@ Figures regenerate from a single `out/bench.json` produced by `mqd bench`, then 
 
 ## The four crates
 
-### [`mqd-core`](crates/mqd-core/) — types, schemas, traits
+### [`mqd-core`](crates/mqd-core/) — types, schemas, traits · [![crates.io](https://img.shields.io/crates/v/mqd-core.svg)](https://crates.io/crates/mqd-core)
 
 **What.** `EntityPath` (validated slash-delimited hierarchical path), `ComponentKind` enum, Arrow `Schema` factory per kind, `Event` (the ingest unit), `StatusReporter` trait with `TerminalReporter` / `JsonReporter` / `NullReporter`, and the numbered `NON_CLAIMS` constant.
 
@@ -107,7 +107,7 @@ let schema = schema_for(ComponentKind::Transform3D);
 assert_eq!(schema.field(0).name(), "t_ns");
 ```
 
-### [`mqd-engine`](crates/mqd-engine/) — ingest, store, query, ops
+### [`mqd-engine`](crates/mqd-engine/) — ingest, store, query, ops · [![crates.io](https://img.shields.io/crates/v/mqd-engine.svg)](https://crates.io/crates/mqd-engine)
 
 **What.** The async ingest pipeline (`ingest::run` with producer/flusher topology and `CancellationToken`-driven shutdown), the snapshot-isolated `Store`, the `latest_at` / `range_scan` query implementations with `QueryPlan` telemetry, and the two domain operators (`proximity_pairs`, `speed_over_ground`).
 
@@ -134,7 +134,7 @@ let result = latest_at(&snap, LatestAtQuery {
 println!("rows={} scanned_partitions={}", result.batch.num_rows(), result.plan.scanned_partitions);
 ```
 
-### [`mqd-cli`](crates/mqd-cli/) — the `mqd` binary
+### [`mqd-cli`](crates/mqd-cli/) — the `mqd` binary · [![crates.io](https://img.shields.io/crates/v/mqd-cli.svg)](https://crates.io/crates/mqd-cli)
 
 **What.** clap-based subcommands: `generate` (seeded synthetic event stream), `ingest` (JSONL → store, with `--batch-rows`), `query latest-at` / `query range` (with `--explain`), `op proximity` / `op speed`, `bench` (single-file JSON benchmark report), `figs` (PNGs from that report), and `non-claims` (prints the numbered charter). Reporter switch: `--json` before any subcommand emits NDJSON.
 
@@ -148,7 +148,7 @@ cargo run -p mqd-cli --release -- query range \
   --entity /agent/0 --kind transform3d --explain
 ```
 
-### [`mqd-bench`](crates/mqd-bench/) — criterion benches + shared fixtures
+### [`mqd-bench`](crates/mqd-bench/) — criterion benches + shared fixtures · [![crates.io](https://img.shields.io/crates/v/mqd-bench.svg)](https://crates.io/crates/mqd-bench)
 
 **What.** Three criterion benches (`ingest_throughput`, `query_latency`, `ops_scale`) plus a shared `Fixture { seed, agents, ticks }` helper consumed by both the criterion harnesses and the `mqd bench` CLI subcommand.
 
