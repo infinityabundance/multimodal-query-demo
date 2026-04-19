@@ -1,0 +1,459 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{booktabs}
+
+\hypersetup{
+  pdftitle={multimodal-query-demo: an Arrow-native, tokio-based prototype},
+  pdfauthor={Riaan de Beer},
+  pdfsubject={Sparse multi-rate multimodal temporal event streams},
+  pdfkeywords={Arrow, temporal, multimodal, query, Rust, tokio, async}
+}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  framesep=4pt,
+  xleftmargin=6pt,
+  xrightmargin=6pt,
+  showstringspaces=false,
+}
+
+\title{multimodal-query-demo:\\an Arrow-native, tokio-based prototype for\\sparse multi-rate multimodal temporal event streams}
+\author{Riaan de Beer\\\texttt{predictiverendezvous@proton.me}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This design note accompanies a small Rust prototype for querying sparse multi-rate
+multimodal temporal event streams. The prototype provides point-in-time and half-open
+range scans over Apache Arrow \texttt{RecordBatch}es, two domain operators
+(\emph{proximity\_pairs} and \emph{speed\_over\_ground}), and an async ingest pipeline
+with snapshot-isolated reads via \texttt{arc\_swap::ArcSwap}. The artifact is
+deliberately bounded: in-memory, single-process, single-runtime, synthetic workloads
+only. A numbered non-claims charter is pinned both in source and in this paper, verified
+by a test that fails CI if the two drift. The goal is a finished, technically honest
+slice that demonstrates async-Rust judgment, Arrow-native data handling, and the kind of
+query semantics that sparse multimodal logs demand, not a production system.
+\end{abstract}
+
+\section{Motivation}
+
+Robotics, autonomous systems, and scientific instrumentation produce streams of events
+whose modalities --- poses, scalars, annotations, image references, point clouds ---
+update at independent cadences. A 200~Hz IMU, a 30~Hz camera, and a 1~Hz annotation
+stream do not share a clock, and forcing them into a single row-aligned table introduces
+either null-padding (wasted storage, confusing semantics) or resampling (information
+loss before a query has even been posed). The temporal-database and time-series
+literature has long preferred columnar, per-stream layouts with point-in-time
+resolution; the prototype here takes that view and commits to it.
+
+Two query shapes matter disproportionately in this setting. The first is
+\emph{latest-at}: ``for each entity, what is its most recent pose as of time $t$?''
+This is the query that lets a visualiser or a derived operator see a consistent frozen
+world. The second is the \emph{range scan} with kind and entity pruning, which lets
+derived operators walk a sparse slice of history without scanning the full log. Both
+queries are cheap when the store is partitioned well and expensive when it is not; both
+are easy to specify informally and surprisingly subtle to specify precisely --- ties at
+equal timestamps, half-open vs.\ closed bounds, and snapshot isolation under concurrent
+writes all need explicit contracts.
+
+This prototype picks one concrete implementation path for those two queries, wraps it
+in an async ingest pipeline, layers two representative domain operators on top
+(\emph{proximity\_pairs} and \emph{speed\_over\_ground}), and measures the result
+honestly. It is not trying to be a database. It is trying to show that the author can
+make scope-sane design calls, write async Rust that earns its weight, and ship a thing
+that builds, tests, and reproduces end-to-end.
+
+\section{Scope and non-goals}
+\label{sec:scope}
+
+In scope: a four-crate Rust workspace (\texttt{mqd-core}, \texttt{mqd-engine},
+\texttt{mqd-cli}, \texttt{mqd-bench}); five typed component kinds;
+\texttt{latest\_at}\,/\,\texttt{range\_scan} with a query-plan surface and
+\texttt{-{}-explain}; two domain operators; a deterministic seeded synthetic generator;
+criterion benches plus a single-file \texttt{mqd bench} JSON report; figure rendering;
+and this paper built by \texttt{latexmk}.
+
+Out of scope, by design: durability (no WAL, no IPC files, no restart), distribution
+(single process, single memory space), SQL or any third-party query engine, any network
+surface, image or mesh byte-level decoding (we store references only), multi-timeline
+joins beyond per-entity point-in-time resolution, and any claim of compatibility or
+parity with any specific production system. The numbered non-claims charter in
+Section~\ref{sec:nonclaims} fixes this boundary and is enforced by a CI test.
+
+\section{Architecture}
+
+A \texttt{tokio::sync::mpsc} channel moves \texttt{Event}s from one or more producer
+tasks to a single flusher task, which assembles per-kind Arrow \texttt{RecordBatch}es
+and appends them to a store partitioned by
+\texttt{(ComponentKind, bucket\_start\_ns)}. The store keeps an
+\texttt{arc\_swap::ArcSwap} pointer to the current \texttt{StoreSnapshot}. Readers
+clone the pointer (lock-free) and hold an immutable view for the duration of their
+query. A \texttt{tokio\_util::sync::CancellationToken} is threaded through the ingest
+pipeline so that a final \texttt{flush\_all} fires exactly once, whether the CLI exits
+cleanly or is cancelled mid-stream.
+
+\begin{figure}[h]
+\centering
+\begin{tabular}{c}
+\fbox{\parbox{0.9\textwidth}{\centering
+\texttt{producers (N tasks)} $\longrightarrow$ \texttt{mpsc<Event>}
+$\longrightarrow$ \texttt{flusher (1 task)} \\[2pt]
+$\longrightarrow$ per-kind \texttt{KindBatcher} $\longrightarrow$
+\texttt{Store::append\_batch} \\[2pt]
+\texttt{ArcSwap<StoreSnapshot>} $\longleftarrow$ \texttt{swap} \\[2pt]
+\texttt{queries / operators} $\longleftarrow$ \texttt{snapshot.load\_full()}
+}}
+\end{tabular}
+\caption{Pipeline roles. One writer, many readers, snapshot isolated. The channel
+bounds producer--flusher backpressure; the atomic swap is the only reader--writer
+synchronisation point.}
+\end{figure}
+
+\section{Data model}
+
+The store understands five \texttt{ComponentKind}s: \texttt{Transform3D},
+\texttt{Points3D}, \texttt{Scalar}, \texttt{ImageRef}, and \texttt{Annotation}. Every
+row carries the same two non-null prefix columns: \texttt{t\_ns:Int64} (event time, UTC
+nanoseconds) and \texttt{entity\_path:Utf8} (a slash-delimited hierarchical identifier
+such as \texttt{/agent/0}). The remaining columns depend on kind. A compact reference:
+
+\begin{center}
+\small
+\begin{tabular}{@{}l l l@{}}
+\toprule
+\textbf{Kind} & \textbf{Columns} & \textbf{Notes} \\
+\midrule
+\texttt{Transform3D} & \texttt{tx,ty,tz,qx,qy,qz,qw:Float64} & translation + unit quaternion \\
+\texttt{Points3D} & \texttt{points:List<Struct<x,y,z:Float64>{}>} & variable-length point cloud \\
+\texttt{Scalar} & \texttt{value:Float64, unit:Utf8?} & \texttt{unit} nullable \\
+\texttt{ImageRef} & \texttt{uri:Utf8, width:Int32, height:Int32, format:Utf8} & reference only, no pixels \\
+\texttt{Annotation} & \texttt{label:Utf8} & string label \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Appendix~\ref{app:schemas} reproduces the full \texttt{arrow::datatypes::Schema}
+definitions verbatim. The partition key is \texttt{(ComponentKind, bucket\_start\_ns)}
+with a default bucket width of 1~second (\texttt{DEFAULT\_BUCKET\_NS = 10\textsuperscript{9}}).
+Buckets are open-ended to the right: a batch whose time range spans a bucket boundary
+is split into the minimum number of sub-batches needed to place each row in its correct
+bucket. This keeps \texttt{range\_scan} pruning by bucket cheap and exact.
+
+\section{Query semantics}
+
+\begin{itemize}
+  \item \textbf{latest\_at}\,$(t, \mathrm{kind}, \mathrm{entity}?)$: for each matching
+    entity, the single row with the largest $t_{ns} \le t$. Ties at equal $t_{ns}$ are
+    broken by the \emph{later-inserted} row, where insertion order is the lexicographic
+    tuple \texttt{(partition\_ix, batch\_ix, row\_ix)}. The tie-break rule is
+    verified by \texttt{latest\_at\_ties\_are\_deterministic}.
+  \item \textbf{range\_scan}\,$(s, e, \mathrm{kind}, \mathrm{entity}?)$: every row
+    with $s \le t_{ns} < e$ (half-open, matching Rust's \texttt{Range}). Inverted
+    bounds ($s > e$) error.
+  \item Both queries return a \texttt{QueryPlan} alongside the result batch:
+    \texttt{candidate\_partitions}, \texttt{pruned\_by\_kind}, \texttt{pruned\_by\_time},
+    \texttt{scanned\_partitions}, \texttt{scanned\_rows}, \texttt{returned\_rows},
+    and \texttt{latency\_us}. Under \texttt{-{}-explain} the plan is serialised to the
+    reporter. Example (terminal reporter):
+
+\begin{lstlisting}
+[mqd] query latest-at
+[config]  entity=/agent/7 at_ns=2500000000 kind=Transform3D
+[store]   snapshot_rows=80000 partitions=125
+[plan]    candidate=125 pruned_by_kind=100 pruned_by_time=22 scanned=3
+[exec]    scanned_rows=1536 returned_rows=1
+[result]  latency=41us
+[done]    ok
+\end{lstlisting}
+\end{itemize}
+
+Snapshot isolation: a reader's \texttt{Arc<StoreSnapshot>} is frozen for the duration
+of the query regardless of concurrent writes. The
+\texttt{tests/concurrent\_snapshots.rs} integration test spawns a background writer and
+asserts that readers never observe a decreasing row count, that every snapshot is
+internally consistent, and that the final snapshot after cancellation contains every
+event the producer emitted.
+
+\section{Domain operators}
+
+\paragraph{proximity\_pairs.} At a point in time $t$, resolve each entity's latest
+\texttt{Transform3D} pose (internally a \texttt{latest\_at} call --- one source of
+truth for point-in-time semantics), then emit every unordered pair whose pose
+separation is $\le r$. Complexity is $O(N^2)$ in the number of distinct entities at
+$t$; no spatial index is used. This is the intended shape and is confirmed, not
+refuted, by the benchmark in Figure~\ref{fig:proximity}. Output schema:
+\texttt{at\_ns:Int64, entity\_a:Utf8, entity\_b:Utf8, distance\_m:Float64}, sorted
+lexicographically on \texttt{(entity\_a, entity\_b)}.
+
+\paragraph{speed\_over\_ground.} For one entity within an optional half-open window,
+select every \texttt{Transform3D} row (internally a \texttt{range\_scan} call), stable-
+sort by $t_{ns}$, and emit one row per consecutive pair with \texttt{dt\_ns},
+\texttt{distance\_m}, and $\mathrm{speed\_mps} = \mathrm{distance\_m}/\Delta t$. Pairs
+with $\Delta t \le 0$ are skipped (duplicate-timestamp noise rather than a semantic
+event). Output schema: \texttt{entity\_path:Utf8, t\_start\_ns:Int64, t\_end\_ns:Int64,
+dt\_ns:Int64, distance\_m:Float64, speed\_mps:Float64}.
+
+Correctness fixtures: \texttt{speed\_constant\_one\_meter\_per\_second} emits a
+10-tick trajectory of 1~m/s due east and asserts every consecutive-pair speed is
+within $10^{-9}$ of 1.0. \texttt{proximity\_symmetric\_pair\_exactly\_on\_radius}
+verifies boundary behaviour and lexicographic ordering.
+
+\section{Async design}
+
+Three concurrent roles share one snapshot:
+
+\begin{itemize}
+  \item \textbf{Producers} (N tasks, one per input source or synthetic generator
+    partition) push \texttt{Event}s into a bounded \texttt{mpsc} channel.
+  \item \textbf{Flusher} (1 task) \texttt{recv()}s into per-kind
+    \texttt{KindBatcher}s, emits \texttt{RecordBatch}es when either
+    \texttt{max\_rows} or \texttt{max\_delay} is hit, and calls
+    \texttt{Store::append\_batch}, which constructs a new \texttt{StoreSnapshot} and
+    atomically replaces the \texttt{ArcSwap} pointer.
+  \item \textbf{Readers} (any task) call \texttt{store.snapshot()}, which is
+    \texttt{O(1)} and lock-free, and then operate on the frozen snapshot for the
+    lifetime of their query.
+\end{itemize}
+
+A \texttt{tokio\_util::sync::CancellationToken} is shared with the flusher. Its
+selector uses \texttt{tokio::select!\ biased} to prefer cancellation over new work,
+then drains any events remaining in the channel, then calls \texttt{flush\_all} exactly
+once before returning. This is the property tested by
+\texttt{tests/concurrent\_snapshots.rs}: after a cancellation, the final snapshot
+contains every event the producer emitted, no more, no less.
+
+What this design \emph{does} prove: that a single-writer, many-reader, snapshot-isolated
+pattern is natural to express in async Rust given the right primitives (\texttt{mpsc},
+\texttt{CancellationToken}, \texttt{ArcSwap}), and that writing an integration test
+against a multi-threaded tokio runtime is straightforward. What it does \emph{not}
+prove: correctness under adversarial concurrent loads, memory-ordering edge cases beyond
+what \texttt{ArcSwap} already guarantees, or performance under realistic fan-in.
+
+\section{Implementation notes}
+
+\paragraph{Partition key.} \texttt{(ComponentKind, bucket\_start\_ns)}. Kind is a
+hard boundary (every query specifies a kind, so we prune a huge fraction of partitions
+at the top); bucket is a soft-sharded time axis. Default bucket width is $10^9$~ns
+(1~s); this is exported as \texttt{DEFAULT\_BUCKET\_NS} and fed into
+\texttt{Store::new}. A single input \texttt{RecordBatch} whose \texttt{t\_ns} range
+spans a bucket boundary is split at the boundary into the minimum number of sub-batches
+needed, so every resulting partition entry has a $[\min t_{ns}, \max t_{ns}]$ envelope
+fully contained in a single bucket. This makes bucket-level time pruning exact and
+lets \texttt{range\_scan} skip whole partitions by arithmetic alone.
+
+\paragraph{Batch sizing.} The CLI exposes \texttt{-{}-batch-rows} (default~4096). This
+trades per-batch fixed overhead (schema resolution, appending to partition list,
+snapshot rebuild) against memory footprint per batch. The default is in the range where
+Arrow's columnar overhead amortises well; no automated tuning is claimed.
+
+\paragraph{RNG determinism.} \texttt{rand\_pcg::Pcg64} is seeded from \texttt{-{}-seed}.
+The generator emits events in strict tick order and, within a tick, entities in sorted
+\texttt{EntityPath} order --- a \texttt{BTreeMap} iteration, never a
+\texttt{HashMap}. Two fingerprint tests pin the output byte-for-byte: the JSONL
+produced by \texttt{mqd generate --seed 42 --agents 4 --ticks 100}, and the
+\texttt{proximity\_pairs} result at \texttt{at=250\_000\_000, radius=2.5} on the
+corresponding store. These are SHA-256 hashes of the raw columnar data --- not of
+Arrow IPC bytes --- so the test is robust to Arrow version encoding changes while
+still pinning every user-visible value.
+
+\paragraph{Tie-break contract.} Equal \texttt{t\_ns} values route to the same partition
+(same bucket), so within a tie set the lexicographic tuple
+\texttt{(partition\_ix, batch\_ix, row\_ix)} is a total order. \texttt{latest\_at}
+scans candidate partitions in this order and keeps the last match when timestamps
+tie --- giving the ``later-inserted row wins'' guarantee for free, without a dedicated
+sequence column.
+
+\paragraph{Error surface.} \texttt{mqd-core} exposes a small \texttt{Error} enum via
+\texttt{thiserror}; user-facing \texttt{anyhow::Result} is used at binary boundaries
+only. Engine-internal calls never use \texttt{anyhow}. Schema mismatches, inverted
+range bounds, and malformed entity paths are all typed errors, not panics.
+
+\section{Prototype evaluation}
+
+The figures below are rendered from a single \texttt{bench.json} report produced by
+\texttt{mqd bench}. Numbers are single-machine wall-clock latencies on one developer
+workstation; see Section~\emph{How to read} for the caveats they carry.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.7\textwidth]{figures/ingest_latency.png}
+  \caption{Ingest (batch + store append) latency versus total event count. Solid line
+  p50, dashed line p95.}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.7\textwidth]{figures/latest_at_latency.png}
+  \caption{\texttt{latest\_at} latency across agent counts at fixed tick budget. Solid
+  p50, dashed p95.}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.7\textwidth]{figures/range_scan_latency.png}
+  \caption{\texttt{range\_scan} latency for a 25\% window on one entity. Solid p50,
+  dashed p95.}
+\end{figure}
+
+\begin{figure}[h]
+  \label{fig:proximity}
+  \centering
+  \includegraphics[width=0.7\textwidth]{figures/proximity_latency.png}
+  \caption{\texttt{proximity\_pairs} latency on log-log axes. Solid p50, dashed p95,
+  grey dashed $O(N^2)$ reference anchored at the smallest measured point. The
+  quadratic shape is \emph{confirmed} by approximate slope-2 on log-log, not refuted.}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.7\textwidth]{figures/speed_latency.png}
+  \caption{\texttt{speed\_over\_ground} latency on log-log axes with an $O(N)$
+  reference line. Solid p50, dashed p95.}
+\end{figure}
+
+\section{How to read the prototype outputs}
+
+All latencies are wall-clock on a single machine under a multi-threaded tokio runtime.
+Ingest numbers measure Arrow-shaped event production through the channel and snapshot
+swap; JSONL parsing is excluded. Proximity scaling is quadratic by construction. These
+numbers are prototype signal, not product benchmarks, and cannot be extrapolated to any
+other workload or system. Variance between runs on the same workstation is not
+characterised. The sample count (\texttt{-{}-samples}, default 51) is the smallest $n$
+for which nearest-rank p95 and p99 land on distinct order statistics
+(\texttt{sorted[48]} and \texttt{sorted[50]} respectively); the figures show p50 and
+p95 only because at this $n$ p99 is equal to the maximum observation and carries no
+more information than "worst in the run". The \texttt{-{}-samples} flag lets the
+reader increase $n$ for a narrower percentile estimate.
+
+\section{Limitations}
+
+Synthetic data only. No spatial index (proximity is $O(N^2)$ by design). Concurrency
+tested via unit and integration tests only; adversarial concurrent loads have not been
+stress-tested. Memory has not been profiled. Semantic correctness is bounded by fixture
+coverage. No durability: the store lives entirely in the process heap and is lost on
+exit. No multi-timeline joins: every query works against a single event-time timeline,
+and the \texttt{Timeline} type exists but is not exercised beyond that.
+
+\section{Non-claims}
+\label{sec:nonclaims}
+
+\begin{enumerate}[label=\arabic*.]
+  \item multimodal-query-demo is not a database. It is not durable, not transactional, and does not survive process restart.
+  \item multimodal-query-demo does not claim compatibility or parity with any specific production system. It is an independent design exercise against public literature on sparse multimodal temporal logs.
+  \item Point-in-time query semantics are validated only against the synthetic fixtures in the test suite. Correctness against arbitrary real-world workloads is not claimed.
+  \item multimodal-query-demo does not implement SQL, a third-party query engine, a network protocol, or any query interface beyond the typed operators exposed on its CLI.
+  \item Benchmark numbers are single-machine, synthetic-workload latencies on the author's hardware. They are not throughput claims, not SLA claims, and not comparisons against any other system.
+  \item multimodal-query-demo does not claim cloud-native, distributed, or multi-node behavior. It is one process, one memory space, orchestrated by a single tokio runtime.
+\end{enumerate}
+
+\section{Reproducibility}
+
+\begin{lstlisting}
+cargo test --workspace
+cargo run --release -p mqd-cli -- bench --out out/bench.json
+cargo run --release -p mqd-cli -- figs --from out/bench.json \
+    --out paper/figures/
+./paper/build.sh
+\end{lstlisting}
+
+The deterministic-replay test pins SHA-256 fingerprints for (a) the JSONL generator
+output at \texttt{seed=42, agents=4, ticks=100}, and (b) the
+\texttt{proximity\_pairs} result on the corresponding store at
+\texttt{at=250\_000\_000, radius=2.5}. The non-claims lock test parses this paper's
+\texttt{Non-claims} enumerate block and asserts byte-for-byte equality with
+\texttt{mqd\_core::NON\_CLAIMS}. Both tests fail CI on any drift.
+
+\section{Future work}
+
+Plausible, small extensions only --- this is a sketch of where a next iteration would
+go, not a roadmap.
+
+\begin{itemize}
+  \item \textbf{Durability via Arrow IPC.} A \texttt{-{}-dump out.arrow} path that
+    serialises every partition's batch list to an Arrow IPC file, and a loader that
+    hydrates a \texttt{Store} from one. No write-ahead log; no crash consistency.
+  \item \textbf{Spatial index for proximity.} A $k$-d tree or uniform grid rebuilt per
+    call would drop \texttt{proximity\_pairs} from $O(N^2)$ to expected $O(N \log N)$
+    for reasonable densities. The operator is already isolated behind a \texttt{Query}
+    type; swapping the implementation is a local change.
+  \item \textbf{Richer time-coalescing.} A \texttt{latest\_within} operator that
+    returns the latest row within a backward window rather than the single nearest
+    $t_{ns} \le t$, useful when callers want a ``freshness budget'' rather than a
+    point.
+  \item \textbf{Bounded-memory range scans.} Stream \texttt{RecordBatch}es out of
+    \texttt{range\_scan} through an \texttt{impl Stream<Item = RecordBatch>} rather
+    than materialising one batch, for scans large enough that the batch itself is the
+    bottleneck.
+\end{itemize}
+
+\appendix
+
+\section{CLI reference}
+\label{app:cli}
+
+\begin{lstlisting}
+mqd generate   --seed <u64> --agents <u32> --ticks <u32> --out <path>
+mqd ingest     --input <path> [--batch-rows <usize>]
+mqd query latest-at --input <path> --at <i64> [--entity <path>]
+                    [--kind <kind>] [--explain]
+mqd query range     --input <path> --start <i64> --end <i64>
+                    [--entity <path>] [--kind <kind>] [--explain]
+mqd op proximity    --input <path> --at <i64> --radius <f64>
+                    [--explain]
+mqd op speed        --input <path> --entity <path>
+                    [--start <i64>] [--end <i64>] [--explain]
+mqd bench           [--out <path>] [--samples <usize>]
+mqd figs            --from <path> --out <dir>
+mqd non-claims
+\end{lstlisting}
+
+Global: \texttt{-{}-json} before any subcommand switches the reporter from the
+terminal formatter to newline-delimited JSON (one event per line, suitable for
+\texttt{jq}).
+
+\section{Arrow schemas}
+\label{app:schemas}
+
+All schemas share the prefix
+\texttt{t\_ns: Int64 (non-null), entity\_path: Utf8 (non-null)}.
+
+\begin{lstlisting}
+Transform3D:
+  t_ns: Int64, entity_path: Utf8,
+  tx: Float64, ty: Float64, tz: Float64,
+  qx: Float64, qy: Float64, qz: Float64, qw: Float64
+
+Points3D:
+  t_ns: Int64, entity_path: Utf8,
+  points: List<Struct<x: Float64, y: Float64, z: Float64>>
+
+Scalar:
+  t_ns: Int64, entity_path: Utf8,
+  value: Float64, unit: Utf8 (nullable)
+
+ImageRef:
+  t_ns: Int64, entity_path: Utf8,
+  uri: Utf8, width: Int32, height: Int32, format: Utf8
+
+Annotation:
+  t_ns: Int64, entity_path: Utf8,
+  label: Utf8
+\end{lstlisting}
+
+All non-prefix fields are non-null unless marked otherwise. The canonical definitions
+live in \texttt{crates/mqd-core/src/schema.rs}; changes to them flow through a single
+\texttt{schema\_for(kind)} function consumed by the engine, the CLI, and the bench
+harness.
+
+\end{document}

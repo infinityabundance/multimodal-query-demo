@@ -1,0 +1,16 @@
+/target
+/data
+/out
+/paper/figures/*.png
+/paper/*.aux
+/paper/*.bbl
+/paper/*.blg
+/paper/*.fdb_latexmk
+/paper/*.fls
+/paper/*.log
+/paper/*.out
+/paper/*.synctex.gz
+/paper/*.toc
+/paper/*.pdf
+Cargo.lock.bak
+.DS_Store

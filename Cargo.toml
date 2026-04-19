@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mqd-core",
+    "crates/mqd-engine",
+    "crates/mqd-cli",
+    "crates/mqd-bench",
+]
+
+[workspace.package]
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.85"
+license      = "Apache-2.0"
+authors      = ["Riaan de Beer <predictiverendezvous@proton.me>"]
+repository   = "https://github.com/infinityabundance/multimodal-query-demo"
+keywords     = ["arrow", "temporal", "multimodal", "query", "prototype"]
+categories   = ["database-implementations", "command-line-utilities"]
+
+[workspace.dependencies]
+# Arrow stack
+arrow        = { version = "54", features = ["prettyprint"] }
+arrow-array  = "54"
+arrow-schema = "54"
+arrow-buffer = "54"
+arrow-ipc    = "54"
+
+# Async runtime
+tokio        = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "signal"] }
+tokio-stream = "0.1"
+tokio-util   = { version = "0.7", default-features = false, features = ["rt"] }
+futures      = "0.3"
+
+# Errors
+anyhow       = "1"
+thiserror    = "1"
+
+# Data
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+
+# CLI
+clap         = { version = "4.5", features = ["derive"] }
+
+# Crypto / determinism
+sha2         = "0.10"
+hex          = "0.4"
+rand         = "0.8"
+rand_pcg     = "0.3"
+
+# Observability helpers
+parking_lot  = "0.12"
+arc-swap     = "1.7"
+
+# Plotting
+plotters     = { version = "0.3", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "line_series", "ttf"] }
+
+# Bench
+criterion    = { version = "0.5", features = ["async_tokio"] }
+
+# Workspace internal
+mqd-core     = { path = "crates/mqd-core",   version = "0.1.0" }
+mqd-engine   = { path = "crates/mqd-engine", version = "0.1.0" }
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
+
+[profile.bench]
+opt-level     = 3
+lto           = "thin"

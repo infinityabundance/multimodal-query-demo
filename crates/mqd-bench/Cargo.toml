@@ -1,0 +1,32 @@
+[package]
+name        = "mqd-bench"
+version     = { workspace = true }
+edition     = { workspace = true }
+rust-version = { workspace = true }
+license     = { workspace = true }
+authors     = { workspace = true }
+repository  = { workspace = true }
+description = "Criterion benchmarks and shared fixtures for the multimodal-query-demo workspace."
+
+[dependencies]
+mqd-core     = { workspace = true }
+mqd-engine   = { workspace = true }
+arrow        = { workspace = true }
+tokio        = { workspace = true }
+anyhow       = { workspace = true }
+
+[dev-dependencies]
+criterion    = { workspace = true }
+tokio        = { workspace = true }
+
+[[bench]]
+name    = "ingest_throughput"
+harness = false
+
+[[bench]]
+name    = "query_latency"
+harness = false
+
+[[bench]]
+name    = "ops_scale"
+harness = false

@@ -1,0 +1,30 @@
+[package]
+name        = "mqd-cli"
+version     = { workspace = true }
+edition     = { workspace = true }
+rust-version = { workspace = true }
+license     = { workspace = true }
+authors     = { workspace = true }
+repository  = { workspace = true }
+description = "Command-line interface for multimodal-query-demo (binary: mqd)."
+
+[[bin]]
+name = "mqd"
+path = "src/main.rs"
+
+[dependencies]
+mqd-core     = { workspace = true }
+mqd-engine   = { workspace = true }
+mqd-bench    = { path = "../mqd-bench", version = "0.1.0" }
+arrow        = { workspace = true }
+arrow-array  = { workspace = true }
+arrow-ipc    = { workspace = true }
+tokio        = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util   = { workspace = true }
+futures      = { workspace = true }
+anyhow       = { workspace = true }
+clap         = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+plotters     = { workspace = true }
