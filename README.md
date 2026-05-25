@@ -2,6 +2,8 @@
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/infinityabundance/multimodal-query-demo/blob/main/notebooks/reproduce.ipynb)
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/infinityabundance/multimodal-query-demo)
+
 **Status**: bounded prototype, `v0.1.1`.
 
 An Arrow-native, tokio-based Rust workspace for querying **sparse multi-rate multimodal temporal event streams** — the shape of data produced by robotics stacks, sensor fusion pipelines, and scientific instrumentation, where a 200 Hz IMU, a 30 Hz camera, and a 1 Hz annotator share one event-time timeline without sharing a clock.
